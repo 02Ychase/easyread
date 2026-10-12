@@ -30,6 +30,9 @@ def engine_for(cfg: dict, model: str | None) -> dict:
     return out
 
 
+BULK_WORKERS = 8  # 同时译几篇：每篇一个 claude CLI（一篇内部还会按段并行），超过的排队
+
+
 class Jobs:
     def __init__(self, lib: Library):
         self.lib = lib
@@ -39,8 +42,9 @@ class Jobs:
         self.recent: list[dict] = []  # 小任务的状态，给页面轮询
         self.lock = threading.Lock()
         self._resume()
-        for target in (self._bulk_loop, self._small_loop):
-            threading.Thread(target=target, daemon=True).start()
+        threading.Thread(target=self._small_loop, daemon=True).start()
+        for _ in range(BULK_WORKERS):
+            threading.Thread(target=self._bulk_loop, daemon=True).start()
 
     # ---------- 整篇 ----------
     def _write(self, ws: Workspace, **fields):

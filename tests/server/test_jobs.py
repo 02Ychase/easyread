@@ -82,7 +82,8 @@ class JobsTest(unittest.TestCase):
         states = []
         with patch("easyread.server.jobs.threading.Thread.start", side_effect=lambda: states.append(self.ws.load("job")["state"])):
             resumed = Jobs(self.lib)
-        self.assertEqual(states, ["queued", "queued"])
+        self.assertTrue(states)
+        self.assertEqual(set(states), {"queued"})
         self.assertEqual(resumed.bulk.qsize(), 1)
 
     def test_small_job_ids_are_unique_with_frozen_clock(self):
