@@ -256,30 +256,36 @@ def run_openai(c: dict, prompt: str, images: list[Path], cancel=None, meter=None
     return openai_api.complete(c, prompt, images, cancel, meter)
 
 
+_DECODER = json.JSONDecoder(strict=False)  # 字符串里的原样换行也接受
+
+
+def _object(s: str):
+    """s 里第一个能解出、并且一直延伸到最后一个 } 的 JSON 对象，返回 (对象, 第一个解码错误)。
+    前面的废话里可能有 [78] 这种引用、{x} 这种写法，解不出或不延伸到末尾就跳过；
+    外层对象坏了时不取它里面的子对象（子对象不延伸到末尾）。"""
+    last, err, i = s.rfind("}"), None, s.find("{")
+    while 0 <= i < last:
+        try:
+            obj, end = _DECODER.raw_decode(s, i)
+            if isinstance(obj, dict) and end > last:
+                return obj, None
+        except json.JSONDecodeError as e:
+            err = err or e
+        i = s.find("{", i + 1)
+    return None, err
+
+
 def parse_json(text: str):
     """从模型输出里取出 JSON（容忍 ```json 围栏和前后废话）。"""
     t = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()  # 推理模型（deepseek-r1、qwen3）先输出的思考过程
-    # 先取最外层的 { … }：译文里可能本身带代码块（论文附录的 PyTorch 代码），按 ``` 围栏切会切到半截
-    bodies = []
-    for s in (t, *(m.group(1).strip() for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", t))):
-        start = min([i for i in (s.find("{"), s.find("[")) if i >= 0], default=-1)
-        if start >= 0:
-            bodies.append(s[start:max(s.rfind("}"), s.rfind("]")) + 1])
-    if not bodies:
+    obj, err = _object(t)
+    if obj is None:  # 常见毛病：TeX 反斜杠没写成两个（\alpha、\sum）
+        obj, _ = _object(re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", t))
+    if obj is not None:
+        return obj
+    if err is None:
         raise EngineError(tr("模型输出里没有 JSON：{out}", out=text[:200]))
-    first = None
-    for body in bodies:
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError as e:
-            first = first or e
-    body = bodies[0]
-    # 常见毛病：TeX 反斜杠没写成两个（\alpha、\sum）、字符串里有原样换行
-    fixed = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", body)
-    try:
-        return json.loads(fixed, strict=False)
-    except json.JSONDecodeError:
-        raise EngineError(tr("模型输出的 JSON 格式有错（{err}），会自动重试", err=first))
+    raise EngineError(tr("模型输出的 JSON 格式有错（{err}），会自动重试", err=err))
 
 
 def _version(exe: str) -> str:
