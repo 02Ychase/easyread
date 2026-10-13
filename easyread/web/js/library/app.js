@@ -82,7 +82,7 @@
     } catch (e) {
       if (seq !== loadSeq) return false;
       // A response proves the server is reachable, even when its data is unreadable.
-      L.loadErrorTitle = responded || timedOut ? "文献库加载失败" : "连不上本地服务";
+      L.loadErrorTitle = responded || timedOut ? PR.t("文献库加载失败") : PR.t("连不上本地服务");
       L.loadStatus = "error"; L.loadError = e.message || String(e); L.render();
       pollT = setTimeout(() => L.load(), retryMs);
       retryMs = Math.min(retryMs * 2, 15000);
@@ -183,7 +183,7 @@
     else PR.renderDetail && PR.renderDetail();
   };
   function loadHtml() {
-    if (L.loadStatus === "error") return PR.t(L.loadErrorTitle || "文献库加载失败") + " · " + PR.esc(L.loadError) +
+    if (L.loadStatus === "error") return (L.loadErrorTitle || PR.t("文献库加载失败")) + " · " + PR.esc(L.loadError) +
       ' <button class="btn sm line" data-library-retry>' + PR.t("重试") + "</button>";
     return '<span class="spin"></span> ' + (L.items.length ? PR.t("正在更新文献库…") : PR.t("正在加载文献库…"));
   }

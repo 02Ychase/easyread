@@ -164,7 +164,7 @@
     markdown: (n) => refs(n).map((ref) => {
       const b = PR.media.resolve(ref), title = (label(ref) + " · " + PR.t("第 {page} 页", { page: (b || ref).page || "?" })).replace(/[\\[\]]/g, "\\$&");
       const link = PR.store.mode === "server" && b ? "[" + title + "](" + location.origin + location.pathname + "#b-" + encodeURIComponent(b.id) + ")" : title;
-      return "  - " + PR.t("关联图表") + "：" + link + (b ? "" : " · " + PR.t("图表已变化或移除"));
+      return "  - " + PR.t("关联图表") + PR.t("：") + link + (b ? "" : " · " + PR.t("图表已变化或移除"));
     }).join("\n")
   };
   document.addEventListener("load", (e) => { if (e.target.matches && e.target.matches(".note-media img")) PR.layoutMargin(); }, true);
