@@ -18,7 +18,7 @@ import threading
 from pathlib import Path
 
 from ..app.i18n import tr
-from . import agent_cli, codex_lean, netcheck, usage
+from . import agent_cli, codebuddy_cli, codex_lean, netcheck, usage
 from ..app.log import log
 
 
@@ -32,9 +32,9 @@ class Cancelled(RuntimeError):
     pass
 
 
-ENGINE_NAMES = {"claude": "Claude Code", "codex": "Codex CLI", **{k: v["name"] for k, v in agent_cli.SPECS.items()},
+ENGINE_NAMES = {"claude": "Claude Code", "codex": "Codex CLI", "codebuddy": "CodeBuddy CLI", **{k: v["name"] for k, v in agent_cli.SPECS.items()},
                 "openai": "API", "none": "不翻译"}  # i18n-ok 显示时用 engine_name()
-CLI_ENGINES = ("claude", "codex", *agent_cli.ENGINES)  # 本机 CLI：起子进程、用已登录的订阅
+CLI_ENGINES = ("claude", "codex", "codebuddy", *agent_cli.ENGINES)  # 本机 CLI：起子进程、用已登录的订阅
 
 
 def engine_name(engine: str | None) -> str:
@@ -59,6 +59,8 @@ def _run(cfg: dict, prompt: str, cwd: Path, images: list[Path] | None, cancel: t
         return run_claude(cfg["claude"], prompt, cwd, cancel, meter)
     if engine == "codex":
         return run_codex(cfg["codex"], prompt, cwd, images or [], cancel, meter)
+    if engine == "codebuddy":
+        return codebuddy_cli.run(cfg["codebuddy"], prompt, cwd, images or [], cancel, meter)
     if engine == "openai":
         return run_openai(cfg["openai"], prompt, images or [], cancel, meter)
     if engine in agent_cli.ENGINES:
@@ -71,7 +73,7 @@ def image_mode(cfg: dict) -> str:
     engine = cfg.get("engine")
     if engine == "claude" or engine in agent_cli.ENGINES:
         return "claude"
-    if engine == "codex" or (engine == "openai" and cfg["openai"].get("vision")):
+    if engine in ("codex", "codebuddy") or (engine == "openai" and cfg["openai"].get("vision")):
         return "attached"
     return "text"
 
@@ -104,6 +106,8 @@ def cli_path(engine: str, c: dict) -> str | None:
         return claude_path(c)
     if engine == "codex":
         return codex_path(c)
+    if engine == "codebuddy":
+        return codebuddy_cli.path(c)
     return agent_cli.path(engine, c)
 
 
@@ -258,28 +262,13 @@ def run_openai(c: dict, prompt: str, images: list[Path], cancel=None, meter=None
 
 def parse_json(text: str):
     """从模型输出里取出 JSON（容忍 ```json 围栏和前后废话）。"""
-    t = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()  # 推理模型（deepseek-r1、qwen3）先输出的思考过程
-    # 先取最外层的 { … }：译文里可能本身带代码块（论文附录的 PyTorch 代码），按 ``` 围栏切会切到半截
-    bodies = []
-    for s in (t, *(m.group(1).strip() for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", t))):
-        start = min([i for i in (s.find("{"), s.find("[")) if i >= 0], default=-1)
-        if start >= 0:
-            bodies.append(s[start:max(s.rfind("}"), s.rfind("]")) + 1])
-    if not bodies:
+    from .model_json import extract
+    obj, error = extract(text)
+    if obj is not None:
+        return obj
+    if error is None:
         raise EngineError(tr("模型输出里没有 JSON：{out}", out=text[:200]))
-    first = None
-    for body in bodies:
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError as e:
-            first = first or e
-    body = bodies[0]
-    # 常见毛病：TeX 反斜杠没写成两个（\alpha、\sum）、字符串里有原样换行
-    fixed = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", body)
-    try:
-        return json.loads(fixed, strict=False)
-    except json.JSONDecodeError:
-        raise EngineError(tr("模型输出的 JSON 格式有错（{err}），会自动重试", err=first))
+    raise EngineError(tr("模型输出的 JSON 格式有错（{err}），会自动重试", err=error))
 
 
 def _version(exe: str) -> str:
